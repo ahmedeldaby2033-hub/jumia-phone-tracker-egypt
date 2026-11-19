@@ -1,0 +1,126 @@
+{
+  "description": "Price history for tracked phones.",
+  "lastUpdated": "2026-11-19T08:07:00.000Z",
+  "phones": {
+    "honor-play20a-dual-sim-64gb4gb-4g-mobile-phone-light-blue": {
+      "name": "Honor Play20A - Dual SIM - 64GB/4GB - 4G Mobile Phone - Light Blue",
+      "productUrl": "https://www.jumia.com.eg/honor-play20a-dual-sim-64gb4gb-4g-mobile-phone-light-blue-135104005.html",
+      "imageUrl": null,
+      "priceHistory": [
+        {
+          "date": "2026-11-19",
+          "price": 8320,
+          "scrapedAt": "2026-11-19T08:07:00.000Z"
+        }
+      ]
+    },
+    "honor-x5c-plus-dual-sim-4g-128gb4gb-midnight-black": {
+      "name": "Honor X5c Plus Dual SIM 4G 128GB/4GB - Midnight Black",
+      "productUrl": "https://www.jumia.com.eg/honor-x5c-plus-dual-sim-4g-128gb4gb-midnight-black-133885513.html",
+      "imageUrl": null,
+      "priceHistory": [
+        {
+          "date": "2026-11-19",
+          "price": 8399,
+          "scrapedAt": "2026-11-19T08:07:00.000Z"
+        }
+      ]
+    },
+    "honor-x5c-plus-dual-sim-4g-128gb4gb-ocean-cyan": {
+      "name": "Honor X5c Plus Dual SIM 4G 128GB/4GB - Ocean Cyan",
+      "productUrl": "https://www.jumia.com.eg/honor-x5c-plus-dual-sim-4g-128gb4gb-ocean-cyan-133885514.html",
+      "imageUrl": null,
+      "priceHistory": [
+        {
+          "date": "2026-11-19",
+          "price": 8399,
+          "scrapedAt": "2026-11-19T08:07:00.000Z"
+        }
+      ]
+    },
+    "infinix-smart-20-mobile-phone-with-charger-128gb4gbshadow-black": {
+      "name": "Infinix SMART 20 Mobile Phone with Charger 128GB/4GB-Shadow Black",
+      "productUrl": "https://www.jumia.com.eg/infinix-smart-20-mobile-phone-with-charger-128gb4gb-shadow-black-134515918.html",
+      "imageUrl": null,
+      "priceHistory": [
+        {
+          "date": "2026-11-19",
+          "price": 8499,
+          "scrapedAt": "2026-11-19T08:07:00.000Z"
+        }
+      ]
+    },
+    "realme-c100i-dual-sim-4g-4gb-128gb-dawn-purple": {
+      "name": "realme C100i Dual SIM 4G 4GB - 128GB - Dawn Purple",
+      "productUrl": "https://www.jumia.com.eg/realme-c100i-dual-sim-4g-4gb-128gb-dawn-purple-135197882.html",
+      "imageUrl": null,
+      "priceHistory": [
+        {
+          "date": "2026-11-19",
+          "price": 9777,
+          "scrapedAt": "2026-11-19T08:07:00.000Z"
+        }
+      ]
+    },
+    "xiaomi-redmi-17-dual-sim-4g-256gb4gb-black": {
+      "name": "XIAOMI Redmi 17 Dual SIM 4G 256GB/4GB - Black",
+      "productUrl": "https://www.jumia.com.eg/xiaomi-redmi-17-dual-sim-4g-256gb4gb-black-135053135.html",
+      "imageUrl": null,
+      "priceHistory": [
+        {
+          "date": "2026-11-19",
+          "price": 11684,
+          "scrapedAt": "2026-11-19T08:07:00.000Z"
+        }
+      ]
+    },
+    "honor-x7e-6gb-128gb-4g-light-blue": {
+      "name": "Honor X7e 6GB 128GB 4G Light Blue",
+      "productUrl": "https://www.jumia.com.eg/honor-x7e-6gb-128gb-4g-light-blue-135063091.html",
+      "imageUrl": null,
+      "priceHistory": [
+        {
+          "date": "2026-11-19",
+          "price": 12885,
+          "scrapedAt": "2026-11-19T08:07:00.000Z"
+        }
+      ]
+    },
+    "oppo-a6-dual-sim-4g-128gb4gb-aurora-gold": {
+      "name": "OPPO A6 Dual SIM 4G 128GB/4GB - Aurora Gold",
+      "productUrl": "https://www.jumia.com.eg/oppo-a6-dual-sim-4g-128gb4gb-aurora-gold-134895106.html",
+      "imageUrl": null,
+      "priceHistory": [
+        {
+          "date": "2026-11-19",
+          "price": 12999,
+          "scrapedAt": "2026-11-19T08:07:00.000Z"
+        }
+      ]
+    },
+    "xiaomi-redmi-17-dual-sim-4g-256gb6gb-black": {
+      "name": "XIAOMI Redmi 17 Dual SIM 4G 256GB/6GB - Black",
+      "productUrl": "https://www.jumia.com.eg/xiaomi-redmi-17-dual-sim-4g-256gb6gb-black-135053138.html",
+      "imageUrl": null,
+      "priceHistory": [
+        {
+          "date": "2026-11-19",
+          "price": 12999,
+          "scrapedAt": "2026-11-19T08:07:00.000Z"
+        }
+      ]
+    },
+    "realme-c85-dual-sim-256gb8gb-ram-4g-kingfisher-blue": {
+      "name": "realme C85 Dual SIM 256GB/8GB Ram 4G -kingfisher Blue",
+      "productUrl": "https://www.jumia.com.eg/realme-c85-dual-sim-256gb8gb-ram-4g-kingfisher-blue-134381247.html",
+      "imageUrl": null,
+      "priceHistory": [
+        {
+          "date": "2026-11-19",
+          "price": 14899,
+          "scrapedAt": "2026-11-19T08:07:00.000Z"
+        }
+      ]
+    }
+  }
+}

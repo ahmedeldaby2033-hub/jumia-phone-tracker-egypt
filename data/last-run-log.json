@@ -1,0 +1,10 @@
+{
+  "timestamp": "2026-11-19T08:07:00.000Z",
+  "status": "SUCCESS",
+  "elapsedSeconds": 0,
+  "candidatesFound": 10,
+  "specsSucceeded": 10,
+  "specsFailed": 0,
+  "totalWritten": 10,
+  "note": "First sample verified from Jumia Egypt listing and product pages (JSON-LD prices) on 2026-11-19, not from a WebScraping.AI run. The daily workflow still needs WEBSCRAPING_API_KEY."
+}

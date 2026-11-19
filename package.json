@@ -1,0 +1,1 @@
+{"dependencies":{"cheerio":"^1.0.0"},"description":"Daily price tracker for EGP 8k-25k smartphones on Jumia Egypt","name":"jumia-phone-tracker-egypt","scripts":{"scrape":"node scripts/scraper.js"},"version":"1.0.0"}

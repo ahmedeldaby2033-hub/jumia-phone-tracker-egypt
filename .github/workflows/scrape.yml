@@ -18,8 +18,6 @@ jobs:
           node-version: '20'
       - run: npm install cheerio
       - name: Run scraper
-        env:
-          WEBSCRAPING_API_KEY: ${{ secrets.WEBSCRAPING_API_KEY }}
         run: node scripts/scraper.js
       - name: Commit and push data
         run: |

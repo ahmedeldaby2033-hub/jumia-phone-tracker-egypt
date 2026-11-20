@@ -1,16 +1,18 @@
 /**
  * Jumia Egypt Smartphone Price Tracker — Scraper
- * Uses WebScraping.AI API: /text for listings (stealth proxy), /html + cheerio for specs.
+ * Direct fetch, no proxy and no API key: plain HTTP requests with browser
+ * headers + cheerio. Runs on GitHub Actions (ubuntu-latest).
+ *
+ * NOTE: direct fetching was blocked by Jumia's Cloudflare check (HTTP 403)
+ * from the author's own VM on 2026-11-19. Whether GitHub's runner IPs get
+ * through is an open question — the daily run itself is the test. If a run
+ * is blocked, it fails loudly (see BLOCKED handling below) instead of
+ * writing empty data.
  */
 
-const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
-const API_KEY = process.env.WEBSCRAPING_API_KEY;
-if (!API_KEY) { console.error('FATAL: WEBSCRAPING_API_KEY not set.'); process.exit(1); }
-
-const API_BASE = 'api.webscraping.ai';
 const LISTING_URL = 'https://www.jumia.com.eg/smartphones/';
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const MIN_PRICE = 8000;
@@ -19,56 +21,107 @@ const DELAY_MS = 1800;
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 2000;
 const MAX_PAGES = 30;
+const FETCH_TIMEOUT_MS = 30000;
+
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Accept-Encoding': 'gzip, deflate, br',
+  'Connection': 'keep-alive',
+  'Upgrade-Insecure-Requests': '1',
+  'Sec-Fetch-Dest': 'document',
+  'Sec-Fetch-Mode': 'navigate',
+  'Sec-Fetch-Site': 'none',
+  'Sec-Fetch-User': '?1',
+  'Cache-Control': 'max-age=0',
+};
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-function callAPI(endpoint, qp = {}) {
-  const qs = new URLSearchParams({ api_key: API_KEY, ...qp }).toString();
-  return new Promise((resolve, reject) => {
-    const req = https.get(`https://${API_BASE}/${endpoint}?${qs}`, { timeout: 35000 }, (res) => {
-      let d = ''; res.on('data', c => d += c); res.on('end', () => {
-        res.statusCode === 200 ? resolve(d) : reject(new Error(`HTTP ${res.statusCode}: ${d.slice(0,300)}`));
-      });
-    });
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
-  });
+function isBlockedPage(html, status) {
+  if (status === 403 || status === 503) return true;
+  return /just a moment|attention required|cf-chl|challenges\.cloudflare\.com|cf-turnstile|are you a robot|verify you are human/i.test(html);
 }
 
-function fetchListingText(url, page) {
-  return callAPI('text', { url: `${url}?page=${page}&sort=lowest-price`, js: 'true', timeout: '30000', proxy: 'stealth' });
-}
-
-function fetchProductHTML(url) {
-  return callAPI('html', { url, js: 'true', timeout: '25000', proxy: 'stealth' });
+async function fetchDirect(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { headers: BROWSER_HEADERS, signal: controller.signal, redirect: 'follow' });
+    const text = await res.text();
+    if (isBlockedPage(text, res.status)) {
+      throw new Error(`BLOCKED by Cloudflare (HTTP ${res.status}) — Jumia refused this request.`);
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+    return text;
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error(`Timeout after ${FETCH_TIMEOUT_MS}ms for ${url}`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function retry(fn, label) {
   for (let i = 0; i < MAX_RETRIES; i++) {
     try {
-      if (i > 0) { const w = INITIAL_BACKOFF_MS * Math.pow(2, i - 1); console.log(`  Retry ${i+1}/${MAX_RETRIES} (${label}) — ${w}ms…`); await sleep(w); }
+      if (i > 0) { const w = INITIAL_BACKOFF_MS * Math.pow(2, i - 1); console.log(`  Retry ${i + 1}/${MAX_RETRIES} (${label}) — ${w}ms…`); await sleep(w); }
       return await fn();
-    } catch (err) { if (i === MAX_RETRIES - 1) throw err; console.warn(`  Attempt ${i+1} failed (${label}): ${err.message}`); }
+    } catch (err) { if (i === MAX_RETRIES - 1) throw err; console.warn(`  Attempt ${i + 1} failed (${label}): ${err.message}`); }
   }
 }
 
-function parsePrice(str) { return str ? parseInt(str.replace(/(?:EGP|E£|₦|,|\s)/g, ''), 10) : NaN; }
+function parsePrice(str) {
+  if (!str) return NaN;
+  const cleaned = str.replace(/(?:EGP|E£|£|₦|,|\s)/g, '');
+  return parseInt(cleaned, 10);
+}
 
-function parseListingText(text) {
+/**
+ * Parse a Jumia category listing page (server-rendered HTML) with cheerio.
+ * Product cards are <article class="prd ..."> with:
+ *   a.core[href]  — product link
+ *   h3.name       — product name
+ *   div.prc       — current price ("EGP 9,499")
+ *   div.old       — old price (optional)
+ *   div.rev       — rating, e.g. "4.3 (27)" (optional)
+ *   img.img       — data-src (or src) image URL
+ * Fallbacks cover minor markup changes (".c-prd", "[data-id]").
+ */
+function parseListingHTML(html) {
+  const cheerio = require('cheerio');
+  const $ = cheerio.load(html);
   const products = [];
-  const re = /\[\s*\n([^\]]+?)\n\s*(?:EGP|E£|£)\s*([\d,]+(?:\.\d{2})?)\s*\n(?:[\d]+%\s*\n)?\s*\]\(([^)]+)\)/g;
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    const name = m[1].replace(/\n\s*/g, ' ').trim();
-    const price = parseInt(m[2].replace(/,/g, ''), 10); // EGP, decimals dropped
-    const slug = m[3];
-    if (isNaN(price) || !slug || !name) continue;
-    products.push({ name, price, productUrl: slug.startsWith('http') ? slug : `https://www.jumia.com.eg${slug}`, imageUrl: null });
-  }
+  let cards = $('article.prd');
+  if (cards.length === 0) cards = $('.c-prd');
+  if (cards.length === 0) cards = $('[data-id].prd, a.core').filter((_, el) => $(el).find('.prc').length > 0);
+  cards.each((_, el) => {
+    const card = $(el);
+    const link = card.is('a.core') ? card : card.find('a.core').first();
+    const href = link.attr('href');
+    const name = (card.find('h3.name').first().text() || link.attr('title') || '').replace(/\s+/g, ' ').trim();
+    const priceText = card.find('.prc').first().text();
+    const price = parsePrice(priceText);
+    if (isNaN(price) || !href || !name) return;
+    const oldText = card.find('.old').first().text();
+    const oldPrice = parsePrice(oldText);
+    const revText = (card.find('.rev').first().text() || '').trim();
+    const revMatch = revText.match(/([\d.]+)\s*\((\d+)\)/);
+    const img = card.find('img.img').first();
+    const imageUrl = img.attr('data-src') || img.attr('src') || null;
+    products.push({
+      name,
+      price,
+      oldPrice: isNaN(oldPrice) ? null : oldPrice,
+      rating: revMatch ? parseFloat(revMatch[1]) : null,
+      ratingCount: revMatch ? parseInt(revMatch[2], 10) : null,
+      productUrl: href.startsWith('http') ? href.split('?')[0] : `https://www.jumia.com.eg${href.split('?')[0]}`,
+      imageUrl: imageUrl && imageUrl.startsWith('http') ? imageUrl : null,
+    });
+  });
   return products;
 }
-
-function hasMorePages() { return true; }
 
 function extractSpecsFromHTML(html) {
   const $ = require('cheerio').load(html);
@@ -91,17 +144,17 @@ function extractSpecsFromHTML(html) {
     });
   }
   const km = {
-    display: ['display','display_type','screen_size','screen','display_size','size'],
-    ram: ['ram','memory','memory_ram','internal_memory','ram_size'],
-    storage: ['storage','rom','internal_storage','internal','storage_capacity'],
-    battery: ['battery','battery_capacity','battery_type'],
-    camera_rear: ['camera_rear','rear_camera','main_camera','main_lens','back_camera','camera'],
-    camera_front: ['camera_front','front_camera','selfie_camera','single_lens'],
-    processor: ['processor','processor_chipset','cpu','chipset'],
-    os: ['os','operating_system','operating_system_version','android_version'],
-    network: ['network','connectivity','network_type'],
-    sim: ['sim','sim_type'],
-    resolution: ['resolution','screen_resolution'],
+    display: ['display', 'display_type', 'screen_size', 'screen', 'display_size', 'size'],
+    ram: ['ram', 'memory', 'memory_ram', 'internal_memory', 'ram_size'],
+    storage: ['storage', 'rom', 'internal_storage', 'internal', 'storage_capacity'],
+    battery: ['battery', 'battery_capacity', 'battery_type'],
+    camera_rear: ['camera_rear', 'rear_camera', 'main_camera', 'main_lens', 'back_camera', 'camera'],
+    camera_front: ['camera_front', 'front_camera', 'selfie_camera', 'single_lens'],
+    processor: ['processor', 'processor_chipset', 'cpu', 'chipset'],
+    os: ['os', 'operating_system', 'operating_system_version', 'android_version'],
+    network: ['network', 'connectivity', 'network_type'],
+    sim: ['sim', 'sim_type'],
+    resolution: ['resolution', 'screen_resolution'],
   };
   const result = {};
   for (const [tgt, keys] of Object.entries(km)) {
@@ -112,61 +165,54 @@ function extractSpecsFromHTML(html) {
   return result;
 }
 
-async function extractSpecsAI(url) {
-  const q = 'Extract key specs from this phone page as JSON. Keys: display, resolution, ram, storage, battery, camera_rear, camera_front, processor, os, network, sim. Use null if unknown. Return ONLY JSON.';
-  const raw = await retry(() => callAPI('ai/question', { url, question: q, js: 'true', timeout: '25000', proxy: 'stealth' }), `specs: ${url.slice(0,60)}…`);
-  let c = raw.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/i,'');
-  const b1 = c.indexOf('{'), b2 = c.lastIndexOf('}');
-  if (b1 !== -1 && b2 > b1) c = c.slice(b1, b2 + 1);
-  try {
-    const s = JSON.parse(c);
-    ['display','resolution','ram','storage','battery','camera_rear','camera_front','processor','os','network','sim'].forEach(k => { if (!(k in s)) s[k] = null; });
-    return s;
-  } catch(e) {
-    console.warn(`  JSON parse failed: ${e.message}`);
-    return { display:null,resolution:null,ram:null,storage:null,battery:null,camera_rear:null,camera_front:null,processor:null,os:null,network:null,sim:null,_raw:raw.slice(0,300) };
-  }
-}
-
 async function scrapeAll() {
   const st = new Date();
-  console.log(`\n=== Jumia Phone Tracker — ${st.toISOString()} ===\n`);
+  console.log(`\n=== Jumia Phone Tracker (direct fetch, no API key) — ${st.toISOString()} ===\n`);
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
   console.log('-- Phase 1: Scanning listing pages (EGP 8k–25k) --\n');
-  let all = [], seen = new Set(), stopped = false;
+  let all = [], seen = new Set(), blocked = false;
 
   for (let p = 1; p <= MAX_PAGES; p++) {
     console.log(`Page ${p}…`);
-    let text;
-    try { text = await retry(() => fetchListingText(LISTING_URL, p), `listing page ${p}`); }
-    catch(e) { console.error(`  Failed: ${e.message}`); break; }
-    if (text.length < 500 || !/(?:EGP|E£)/.test(text)) {
-      console.warn(`  Suspicious content (${text.length} chars).`);
-      if (p === 1) console.error('  Page 1 invalid — possible block.');
+    let html;
+    try { html = await retry(() => fetchDirect(`${LISTING_URL}?page=${p}&sort=lowest-price`), `listing page ${p}`); }
+    catch (e) {
+      console.error(`  Failed: ${e.message}`);
+      if (/BLOCKED/.test(e.message)) blocked = true;
       break;
     }
-    const prods = parseListingText(text);
+    if (html.length < 500 || !/(?:EGP|E£)/.test(html)) {
+      console.warn(`  Suspicious content (${html.length} chars, no EGP).`);
+      if (p === 1) { blocked = true; console.error('  Page 1 invalid — likely blocked.'); }
+      break;
+    }
+    const prods = parseListingHTML(html);
     console.log(`  ${prods.length} products`);
     let nc = 0, lo = Infinity, hi = -Infinity;
     for (const pr of prods) {
       lo = Math.min(lo, pr.price); hi = Math.max(hi, pr.price);
       if (pr.price >= MIN_PRICE && pr.price <= MAX_PRICE) {
-        const uk = pr.productUrl.split('?')[0];
+        const uk = pr.productUrl;
         if (!seen.has(uk)) { seen.add(uk); all.push(pr); nc++; }
       }
     }
     console.log(`    EGP ${lo.toLocaleString()} – EGP ${hi.toLocaleString()} | +${nc} | total=${all.length}`);
-    if (lo > MAX_PRICE) { console.log(`  Lowest > EGP 25k — stopping.`); stopped = true; break; }
-    if (!hasMorePages(text)) { console.log('  No more pages.'); break; }
+    if (prods.length === 0) { console.log('  No products on this page — stopping.'); break; }
+    if (lo > MAX_PRICE) { console.log(`  Lowest > EGP 25k — stopping.`); break; }
     await sleep(DELAY_MS);
   }
 
   console.log(`\n-- Phase 1 done: ${all.length} candidates --\n`);
 
   if (all.length === 0) {
-    writeJSON('last-run-log.json', { timestamp: new Date().toISOString(), status: 'WARNING', message: 'No products parsed — check selectors.', candidatesFound: 0, specsSucceeded: 0, specsFailed: 0 });
-    console.log('WARNING: No products found.');
+    const status = blocked ? 'BLOCKED' : 'WARNING';
+    const message = blocked
+      ? 'Jumia blocked direct requests (Cloudflare). No data written — previous data kept.'
+      : 'No products parsed — check selectors.';
+    writeJSON('last-run-log.json', { timestamp: new Date().toISOString(), status, message, candidatesFound: 0, specsSucceeded: 0, specsFailed: 0 });
+    console.log(`${status}: ${message}`);
+    if (blocked) process.exit(2);
     return;
   }
 
@@ -176,23 +222,23 @@ async function scrapeAll() {
 
   for (let i = 0; i < all.length; i++) {
     const c = all[i];
-    console.log(`[${i+1}/${all.length}] ${c.name.slice(0,50)}`);
+    console.log(`[${i + 1}/${all.length}] ${c.name.slice(0, 50)}`);
     let specs;
     try {
-      const html = await retry(() => fetchProductHTML(c.productUrl), `product: ${c.name.slice(0,40)}`);
+      const html = await retry(() => fetchDirect(c.productUrl), `product: ${c.name.slice(0, 40)}`);
       specs = extractSpecsFromHTML(html);
-      const hasS = Object.values(specs).some(v => v !== null);
-      if (!hasS) { console.log('    cheerio found nothing, trying AI…'); specs = await extractSpecsAI(c.productUrl); }
-      const imgM = html.match(/<img[^>]*data-src="([^"]+)"/i) || html.match(/<img[^>]*src="(https?:\/\/[^"]*\.(?:jpg|jpeg|png|webp)[^"]*)"/i);
-      if (imgM) c.imageUrl = imgM[1];
+      if (!c.imageUrl) {
+        const imgM = html.match(/<img[^>]*data-src="([^"]+)"/i) || html.match(/<img[^>]*src="(https?:\/\/[^"]*\.(?:jpg|jpeg|png|webp)[^"]*)"/i);
+        if (imgM) c.imageUrl = imgM[1];
+      }
       ok++;
-      console.log(`  Specs OK (${Object.values(specs).filter(v=>v!==null).length} fields)`);
-    } catch(e) {
+      console.log(`  Specs OK (${Object.values(specs).filter(v => v !== null).length} fields)`);
+    } catch (e) {
       fail++;
       console.warn(`  Failed: ${e.message}`);
-      specs = { display:null,resolution:null,ram:null,storage:null,battery:null,camera_rear:null,camera_front:null,processor:null,os:null,network:null,sim:null,_error:e.message };
+      specs = { display: null, resolution: null, ram: null, storage: null, battery: null, camera_rear: null, camera_front: null, processor: null, os: null, network: null, sim: null, _error: e.message };
     }
-    results.push({ name:c.name, price:c.price, productUrl:c.productUrl, imageUrl:c.imageUrl, specs, scrapedAt:new Date().toISOString() });
+    results.push({ name: c.name, price: c.price, oldPrice: c.oldPrice, rating: c.rating, ratingCount: c.ratingCount, productUrl: c.productUrl, imageUrl: c.imageUrl, specs, scrapedAt: new Date().toISOString() });
     if (i < all.length - 1) await sleep(DELAY_MS);
   }
 
@@ -225,12 +271,12 @@ function updateHistory(phones) {
   if (!h || !h.phones) h = { description: 'Price history for tracked phones.', lastUpdated: new Date().toISOString(), phones: {} };
   const today = new Date().toISOString().split('T')[0];
   for (const p of phones) {
-    const k = p.name.toLowerCase().replace(/[^a-z0-9\s]/g,'').replace(/\s+/g,'-').replace(/(\d+)gb\s*ram/i,'$1gb').replace(/(\d+)gb\s*rom/i,'$1gb').replace(/-+/g,'-').replace(/^-|-$/g,'').slice(0,80);
-    if (!h.phones[k]) h.phones[k] = { name:p.name, productUrl:p.productUrl, imageUrl:p.imageUrl, priceHistory:[] };
+    const k = p.name.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, '-').replace(/(\d+)gb\s*ram/i, '$1gb').replace(/(\d+)gb\s*rom/i, '$1gb').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 80);
+    if (!h.phones[k]) h.phones[k] = { name: p.name, productUrl: p.productUrl, imageUrl: p.imageUrl, priceHistory: [] };
     const hi = h.phones[k];
     if (p.imageUrl) hi.imageUrl = p.imageUrl;
-    const last = hi.priceHistory[hi.priceHistory.length-1];
-    if (!last || last.price !== p.price || last.date !== today) hi.priceHistory.push({ date:today, price:p.price, scrapedAt:p.scrapedAt });
+    const last = hi.priceHistory[hi.priceHistory.length - 1];
+    if (!last || last.price !== p.price || last.date !== today) hi.priceHistory.push({ date: today, price: p.price, scrapedAt: p.scrapedAt });
   }
   h.lastUpdated = new Date().toISOString();
   return h;
@@ -238,6 +284,6 @@ function updateHistory(phones) {
 
 scrapeAll().catch(err => {
   console.error('\n=== FATAL ==='); console.error(err);
-  try { if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true }); writeJSON('last-run-log.json', { timestamp: new Date().toISOString(), status: 'FATAL', error: err.message }); } catch(_) {}
+  try { if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true }); writeJSON('last-run-log.json', { timestamp: new Date().toISOString(), status: 'FATAL', error: err.message }); } catch (_) { }
   process.exit(1);
 });

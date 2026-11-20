@@ -16,20 +16,17 @@ That is the Egypt mid-range sweet spot I verified on Jumia Egypt on 2026-11-19: 
 
 ## How it works
 
-A GitHub Actions workflow runs daily at **5 AM UTC (7 AM Cairo)**, scraping Jumia via the WebScraping.AI API and committing results to `data/phones.json`. The frontend at `index.html` reads that data and renders it client-side.
+A GitHub Actions workflow runs daily at **5 AM UTC (7 AM Cairo)**, scraping Jumia directly with plain HTTP requests (browser headers + cheerio) and committing results to `data/phones.json`. The frontend at `index.html` reads that data and renders it client-side.
 
-Direct fetching from a server is blocked by Jumia's Cloudflare check (HTTP 403, "Just a moment...") — I verified this on 2026-11-19 — so the WebScraping.AI stealth proxy from the original project is kept, not removed.
+No API key, proxy, or secret is needed. Direct fetching was blocked by Jumia's Cloudflare check (HTTP 403, "Just a moment...") from one server on 2026-11-19 — whether GitHub's runner IPs get through is what the daily run itself tests. If a run is blocked, it fails loudly with status `BLOCKED` in `data/last-run-log.json` and keeps the previous data instead of writing empty results.
 
 ## Setup
 
 1. Create a new GitHub repo, e.g. `jumia-phone-tracker-egypt`, and push this project to it.
-2. Get an API key at https://webscraping.ai and add it as a repo secret:
-   - Settings → Secrets and variables → Actions → New repository secret
-   - Name: `WEBSCRAPING_API_KEY`
-3. Enable GitHub Pages: Settings → Pages → Deploy from a branch → `main` / `/ (root)`.
-4. Trigger the first run: Actions → **Scrape Jumia Phones** → **Run workflow**.
+2. Enable GitHub Pages: Settings → Pages → Deploy from a branch → `main` / `/ (root)`.
+3. Trigger the first run: Actions → **Scrape Jumia Phones** → **Run workflow**.
 
-No API key is stored in this repo. The scraper exits immediately if `WEBSCRAPING_API_KEY` is not set.
+That's it — no secrets to configure.
 
 ## First sample data
 
@@ -43,7 +40,7 @@ Go to Actions → click **Scrape Jumia Phones** → **Run workflow**.
 
 ## Files
 
-- `scripts/scraper.js` — Node scraper (WebScraping.AI `/text` for listings, `/html` + cheerio for specs, `/ai/question` fallback)
+- `scripts/scraper.js` — Node scraper (direct fetch + cheerio for listings and specs)
 - `.github/workflows/scrape.yml` — daily run at 5 AM UTC, commits `data/`
 - `index.html` — frontend, reads `data/phones.json` + `data/history.json`
 - `data/phones.json` — latest phones and prices
